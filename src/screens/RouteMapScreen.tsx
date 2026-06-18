@@ -1,0 +1,325 @@
+import React, {useCallback, useRef, useState, useEffect} from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Platform,
+  Alert,
+} from 'react-native';
+import MapView, {Polyline, PROVIDER_GOOGLE} from 'react-native-maps';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {RouteProp, useRoute} from '@react-navigation/native';
+import {RootStackParamList, Shop} from '../types';
+import {COLORS} from '../constants/colors';
+import {useRouteData} from '../hooks/useRouteData';
+import {useLiveTracking} from '../hooks/useLiveTracking';
+import {getBoundingBox, getRouteProgress} from '../utils/mapUtils';
+import ShopMarker from '../components/map/ShopMarker';
+import RepMarker from '../components/map/RepMarker';
+import ShopDetailSheet, {ShopDetailSheetRef} from '../components/sheets/ShopDetailSheet';
+import LoadingOverlay from '../components/common/LoadingOverlay';
+
+type RouteParam = RouteProp<RootStackParamList, 'RouteMap'>;
+
+export default function RouteMapScreen() {
+  const {params} = useRoute<RouteParam>();
+  const insets = useSafeAreaInsets();
+  const mapRef = useRef<MapView>(null);
+  const sheetRef = useRef<ShopDetailSheetRef>(null);
+
+  const {route, rep, loading, error, refresh} = useRouteData(params.repId);
+  const [liveEnabled, setLiveEnabled] = useState(true);
+  const {currentPosition, lastUpdated, isTracking} = useLiveTracking(
+    params.repId,
+    liveEnabled,
+  );
+
+  const handleFitRoute = useCallback(() => {
+    if (!route?.polylineCoords.length) {return;}
+    const region = getBoundingBox(route.polylineCoords);
+    mapRef.current?.animateToRegion(region, 600);
+  }, [route]);
+
+  const handleShopPress = useCallback((shop: Shop) => {
+    sheetRef.current?.open(shop);
+  }, []);
+
+  const toggleLive = useCallback(() => {
+    setLiveEnabled(prev => !prev);
+  }, []);
+
+  // Fit map once route loads
+  useEffect(() => {
+    if (route?.polylineCoords.length) {
+      const timer = setTimeout(handleFitRoute, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [route, handleFitRoute]);
+
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.retryBtn} onPress={refresh}>
+          <Text style={styles.retryText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const progress = route ? getRouteProgress(route.shops) : 0;
+  const visitedCount = route?.shops.filter(s => s.visitStatus === 'visited').length ?? 0;
+  const totalCount = route?.shops.length ?? 0;
+
+  // Split polyline into visited/unvisited segments
+  const visitedCoords =
+    route?.shops
+      .filter(s => s.visitStatus === 'visited')
+      .map(s => ({latitude: s.lat, longitude: s.lng})) ?? [];
+  const fullCoords = route?.polylineCoords ?? [];
+
+  return (
+    <View style={styles.container}>
+      <MapView
+        ref={mapRef}
+        style={styles.map}
+        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+        showsUserLocation={false}
+        showsMyLocationButton={false}
+        showsCompass
+        showsScale
+        mapType="standard"
+        initialRegion={{
+          latitude: 6.9271,
+          longitude: 79.8612,
+          latitudeDelta: 0.08,
+          longitudeDelta: 0.08,
+        }}>
+        {/* Full route (dashed, gray) */}
+        {fullCoords.length > 1 && (
+          <Polyline
+            coordinates={fullCoords}
+            strokeColor={COLORS.unvisited + '80'}
+            strokeWidth={3}
+            lineDashPattern={[8, 6]}
+          />
+        )}
+
+        {/* Visited segment (solid, primary) */}
+        {visitedCoords.length > 1 && (
+          <Polyline
+            coordinates={visitedCoords}
+            strokeColor={COLORS.primary}
+            strokeWidth={4}
+          />
+        )}
+
+        {/* Shop markers */}
+        {route?.shops.map(shop => (
+          <ShopMarker key={shop.id} shop={shop} onPress={handleShopPress} />
+        ))}
+
+        {/* Live rep position */}
+        {currentPosition && liveEnabled && (
+          <RepMarker
+            latitude={currentPosition.latitude}
+            longitude={currentPosition.longitude}
+          />
+        )}
+      </MapView>
+
+      {loading && <LoadingOverlay message="Loading route..." />}
+
+      {/* Map action buttons */}
+      <View style={[styles.actionButtons, {top: insets.top + 60}]}>
+        <TouchableOpacity style={styles.mapBtn} onPress={handleFitRoute}>
+          <Text style={styles.mapBtnIcon}>⊞</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.mapBtn, liveEnabled && styles.mapBtnActive]}
+          onPress={toggleLive}>
+          <Text style={[styles.mapBtnIcon, liveEnabled && styles.mapBtnIconActive]}>
+            ◎
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Legend */}
+      <View style={[styles.legend, {top: insets.top + 60}]}>
+        <LegendItem color={COLORS.visited} label="Visited" />
+        <LegendItem color={COLORS.skipped} label="Skipped" />
+        <LegendItem color={COLORS.unvisited} label="Pending" />
+      </View>
+
+      {/* Bottom summary card */}
+      <View style={[styles.bottomCard, {paddingBottom: insets.bottom + 16}]}>
+        <View style={styles.bottomCardTop}>
+          <View style={styles.repInfoRow}>
+            <View style={styles.repAvatarSm}>
+              <Text style={styles.repAvatarSmText}>
+                {rep?.avatar ?? '??'}
+              </Text>
+            </View>
+            <View>
+              <Text style={styles.repNameSm}>{rep?.name ?? '—'}</Text>
+              <Text style={styles.repZone}>{rep?.zone ?? ''}</Text>
+            </View>
+          </View>
+
+          <View style={styles.progressStats}>
+            <Text style={styles.progressFraction}>{visitedCount}/{totalCount}</Text>
+            <Text style={styles.progressLabel}>Shops</Text>
+          </View>
+        </View>
+
+        {/* Progress bar */}
+        <View style={styles.progressBarBg}>
+          <View style={[styles.progressBarFill, {width: `${progress}%`}]} />
+        </View>
+        <Text style={styles.progressPct}>{progress}% complete</Text>
+
+        {/* Live status */}
+        {liveEnabled && (
+          <View style={styles.liveRow}>
+            <View style={styles.liveDot} />
+            <Text style={styles.liveText}>
+              Live tracking active
+              {lastUpdated ? ` · ${lastUpdated.toLocaleTimeString()}` : ''}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      <ShopDetailSheet ref={sheetRef} />
+    </View>
+  );
+}
+
+function LegendItem({color, label}: {color: string; label: string}) {
+  return (
+    <View style={styles.legendItem}>
+      <View style={[styles.legendDot, {backgroundColor: color}]} />
+      <Text style={styles.legendLabel}>{label}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {flex: 1, backgroundColor: COLORS.background},
+  map: {flex: 1},
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    padding: 24,
+  },
+  errorText: {fontSize: 16, color: COLORS.danger, textAlign: 'center', marginBottom: 16},
+  retryBtn: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  retryText: {color: COLORS.textInverse, fontWeight: '600'},
+  actionButtons: {
+    position: 'absolute',
+    right: 16,
+    gap: 10,
+  },
+  mapBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: COLORS.shadow,
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  mapBtnActive: {backgroundColor: COLORS.primary},
+  mapBtnIcon: {fontSize: 20, color: COLORS.textPrimary},
+  mapBtnIconActive: {color: COLORS.textInverse},
+  legend: {
+    position: 'absolute',
+    left: 16,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: 10,
+    shadowColor: COLORS.shadow,
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  legendItem: {flexDirection: 'row', alignItems: 'center', marginVertical: 3},
+  legendDot: {width: 10, height: 10, borderRadius: 5, marginRight: 7},
+  legendLabel: {fontSize: 11, color: COLORS.textSecondary, fontWeight: '500'},
+  bottomCard: {
+    backgroundColor: COLORS.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 20,
+    shadowColor: COLORS.shadow,
+    shadowOffset: {width: 0, height: -4},
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  bottomCardTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  repInfoRow: {flexDirection: 'row', alignItems: 'center'},
+  repAvatarSm: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  repAvatarSmText: {color: COLORS.textInverse, fontSize: 13, fontWeight: '700'},
+  repNameSm: {fontSize: 15, fontWeight: '700', color: COLORS.textPrimary},
+  repZone: {fontSize: 12, color: COLORS.textSecondary},
+  progressStats: {alignItems: 'flex-end'},
+  progressFraction: {fontSize: 22, fontWeight: '800', color: COLORS.primary},
+  progressLabel: {fontSize: 11, color: COLORS.textSecondary},
+  progressBarBg: {
+    height: 8,
+    backgroundColor: COLORS.progressBg,
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 6,
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: COLORS.progressFill,
+    borderRadius: 4,
+  },
+  progressPct: {fontSize: 12, color: COLORS.textSecondary, fontWeight: '500'},
+  liveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.live,
+    marginRight: 7,
+  },
+  liveText: {fontSize: 12, color: COLORS.live, fontWeight: '500'},
+});
