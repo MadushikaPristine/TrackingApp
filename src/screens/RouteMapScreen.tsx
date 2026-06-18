@@ -13,7 +13,7 @@ import {RootStackParamList, Shop} from '../types';
 import {COLORS} from '../constants/colors';
 import {useRouteData} from '../hooks/useRouteData';
 import {useLiveTracking} from '../hooks/useLiveTracking';
-import {getBoundingBox, getRouteProgress} from '../utils/mapUtils';
+import {getBoundingBox, getRouteProgress, totalPathDistance, formatDistance} from '../utils/mapUtils';
 import ShopMarker from '../components/map/ShopMarker';
 import RepMarker from '../components/map/RepMarker';
 import ShopDetailSheet, {ShopDetailSheetRef} from '../components/sheets/ShopDetailSheet';
@@ -29,7 +29,7 @@ export default function RouteMapScreen() {
 
   const {route, rep, loading, error, refresh} = useRouteData(params.repId);
   const [liveEnabled, setLiveEnabled] = useState(true);
-  const {currentPosition, breadcrumbs, lastUpdated} = useLiveTracking(
+  const {currentPosition, breadcrumbs, totalDistanceKm, lastUpdated} = useLiveTracking(
     params.repId,
     liveEnabled,
   );
@@ -73,6 +73,7 @@ export default function RouteMapScreen() {
 
   // Planned route connecting all shop stops in sequence
   const plannedCoords = route?.polylineCoords ?? [];
+  const plannedDistanceKm = totalPathDistance(plannedCoords);
 
   // Index of the last visited shop — remaining shops form the "ahead" segment
   const lastVisitedIdx = route
@@ -202,11 +203,32 @@ export default function RouteMapScreen() {
         </View>
         <Text style={styles.progressPct}>{progress}% complete</Text>
 
+        {/* Distance row */}
+        <View style={styles.distanceRow}>
+          <DistanceStat
+            label="Traveled"
+            value={formatDistance(totalDistanceKm)}
+            color={COLORS.live}
+          />
+          <View style={styles.distanceDivider} />
+          <DistanceStat
+            label="Planned"
+            value={formatDistance(plannedDistanceKm)}
+            color={COLORS.textSecondary}
+          />
+          <View style={styles.distanceDivider} />
+          <DistanceStat
+            label="Remaining"
+            value={formatDistance(Math.max(0, plannedDistanceKm - totalDistanceKm))}
+            color={COLORS.accent}
+          />
+        </View>
+
         {liveEnabled && (
           <View style={styles.liveRow}>
             <View style={styles.liveDot} />
             <Text style={styles.liveText}>
-              {breadcrumbs.length} GPS point{breadcrumbs.length !== 1 ? 's' : ''} recorded
+              {breadcrumbs.length} GPS point{breadcrumbs.length !== 1 ? 's' : ''} · every 3s
               {lastUpdated ? ` · ${lastUpdated.toLocaleTimeString()}` : ''}
             </Text>
           </View>
@@ -214,6 +236,15 @@ export default function RouteMapScreen() {
       </View>
 
       <ShopDetailSheet ref={sheetRef} />
+    </View>
+  );
+}
+
+function DistanceStat({label, value, color}: {label: string; value: string; color: string}) {
+  return (
+    <View style={styles.distanceStat}>
+      <Text style={[styles.distanceValue, {color}]}>{value}</Text>
+      <Text style={styles.distanceLabel}>{label}</Text>
     </View>
   );
 }
@@ -357,4 +388,16 @@ const styles = StyleSheet.create({
     marginRight: 7,
   },
   liveText: {fontSize: 12, color: COLORS.live, fontWeight: '500'},
+  distanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
+  },
+  distanceStat: {flex: 1, alignItems: 'center'},
+  distanceValue: {fontSize: 15, fontWeight: '700'},
+  distanceLabel: {fontSize: 10, color: COLORS.textLight, marginTop: 2, fontWeight: '500'},
+  distanceDivider: {width: 1, height: 28, backgroundColor: COLORS.borderLight},
 });

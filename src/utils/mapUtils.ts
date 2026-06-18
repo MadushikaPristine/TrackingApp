@@ -5,6 +5,37 @@ export interface Coordinate {
   longitude: number;
 }
 
+const EARTH_RADIUS_KM = 6371;
+
+/** Haversine formula — returns distance in kilometres between two coordinates. */
+export function haversineDistance(a: Coordinate, b: Coordinate): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLng = toRad(b.longitude - a.longitude);
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLng = Math.sin(dLng / 2);
+  const h =
+    sinDLat * sinDLat +
+    Math.cos(toRad(a.latitude)) * Math.cos(toRad(b.latitude)) * sinDLng * sinDLng;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(h));
+}
+
+/** Sum of haversine segments across an ordered coordinate array (km). */
+export function totalPathDistance(coords: Coordinate[]): number {
+  if (coords.length < 2) {return 0;}
+  let dist = 0;
+  for (let i = 1; i < coords.length; i++) {
+    dist += haversineDistance(coords[i - 1], coords[i]);
+  }
+  return dist;
+}
+
+/** Format a km value for display: "0.3 km" or "12.4 km". */
+export function formatDistance(km: number): string {
+  if (km < 0.1) {return `${Math.round(km * 1000)} m`;}
+  return `${km.toFixed(1)} km`;
+}
+
 export function getRouteProgress(shops: Shop[]): number {
   if (!shops.length) {return 0;}
   const done = shops.filter(s => s.visitStatus === 'visited').length;
