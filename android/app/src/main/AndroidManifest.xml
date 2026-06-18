@@ -2,8 +2,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Location permissions intentionally omitted: this is the manager's read-only
+         tracking app. The rep's separate mobile app handles device GPS collection. -->
 
     <application
         android:name=".MainApplication"

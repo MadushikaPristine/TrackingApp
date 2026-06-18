@@ -1,3 +1,14 @@
+/**
+ * useLiveTracking
+ *
+ * Polls the backend every POLLING_INTERVAL_MS for the rep's current GPS
+ * position (sent from the rep's own mobile app). This manager app never
+ * accesses device location — all coordinates come from the server.
+ *
+ * In production replace the mock block inside setInterval with:
+ *   const data = await fetch(`/api/reps/${repId}/location`).then(r => r.json());
+ *   const next = { latitude: data.lat, longitude: data.lng };
+ */
 import {useState, useEffect, useRef, useCallback} from 'react';
 import {MOCK_REPS} from '../data/mockData';
 import {CONFIG} from '../constants/config';
@@ -30,18 +41,15 @@ export function useLiveTracking(
   const [breadcrumbs, setBreadcrumbs] = useState<Position[]>(
     initialPos ? [initialPos] : [],
   );
-  // Accumulated distance in km — incremented by one haversine step per poll tick
   const [totalDistanceKm, setTotalDistanceKm] = useState(0);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isTracking, setIsTracking] = useState(false);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Keep a ref of latest position to avoid stale closure in setInterval
   const positionRef = useRef<Position | null>(initialPos);
-  // Accumulate distance in a ref too so setInterval always sees the latest value
   const distanceRef = useRef(0);
 
-  const stopTracking = useCallback(() => {
+  const stopPolling = useCallback(() => {
     if (intervalRef.current !== null) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -49,40 +57,37 @@ export function useLiveTracking(
     setIsTracking(false);
   }, []);
 
-  const startTracking = useCallback(() => {
+  const startPolling = useCallback(() => {
     if (!rep) {return;}
     setIsTracking(true);
 
     intervalRef.current = setInterval(() => {
+      // ── Mock: simulates a server response from the rep's mobile app ──
+      // In production: replace with await fetch(`/api/reps/${repId}/location`)
       const base = positionRef.current ?? {
         latitude: rep.currentLat,
         longitude: rep.currentLng,
       };
-
-      // Simulate realistic movement: slight forward bias toward next unvisited shop
       const deltaLat = (Math.random() - 0.38) * CONFIG.MAX_MOVEMENT_DELTA;
       const deltaLng = (Math.random() - 0.28) * CONFIG.MAX_MOVEMENT_DELTA;
-
       const next: Position = {
         latitude: base.latitude + deltaLat,
         longitude: base.longitude + deltaLng,
       };
+      // ── End mock ──
 
-      // Accumulate distance: one haversine step per poll — O(1), not O(n)
-      const stepKm = haversineDistance(base, next);
-      distanceRef.current += stepKm;
+      // Accumulate distance: one haversine step per tick — O(1)
+      distanceRef.current += haversineDistance(base, next);
       setTotalDistanceKm(distanceRef.current);
 
       positionRef.current = next;
       setCurrentPosition(next);
 
-      // Append to breadcrumb trail, capping at MAX_BREADCRUMB_POINTS to prevent memory growth
       setBreadcrumbs(prev => {
         const updated = [...prev, next];
-        if (updated.length > CONFIG.MAX_BREADCRUMB_POINTS) {
-          return updated.slice(updated.length - CONFIG.MAX_BREADCRUMB_POINTS);
-        }
-        return updated;
+        return updated.length > CONFIG.MAX_BREADCRUMB_POINTS
+          ? updated.slice(updated.length - CONFIG.MAX_BREADCRUMB_POINTS)
+          : updated;
       });
 
       setLastUpdated(new Date());
@@ -91,23 +96,21 @@ export function useLiveTracking(
 
   useEffect(() => {
     if (enabled) {
-      startTracking();
+      startPolling();
     } else {
-      stopTracking();
+      stopPolling();
     }
-    return () => {
-      stopTracking();
-    };
-  }, [enabled, startTracking, stopTracking]);
+    return () => stopPolling();
+  }, [enabled, startPolling, stopPolling]);
 
-  // Reset breadcrumbs and distance when live tracking is toggled off
+  // Reset accumulated state when polling is disabled
   useEffect(() => {
     if (!enabled) {
       setBreadcrumbs(initialPos ? [initialPos] : []);
-      positionRef.current = initialPos;
-      distanceRef.current = 0;
       setCurrentPosition(initialPos);
       setTotalDistanceKm(0);
+      positionRef.current = initialPos;
+      distanceRef.current = 0;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
