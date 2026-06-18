@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   Platform,
-  Alert,
 } from 'react-native';
 import MapView, {Polyline, PROVIDER_GOOGLE} from 'react-native-maps';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -30,7 +29,7 @@ export default function RouteMapScreen() {
 
   const {route, rep, loading, error, refresh} = useRouteData(params.repId);
   const [liveEnabled, setLiveEnabled] = useState(true);
-  const {currentPosition, lastUpdated, isTracking} = useLiveTracking(
+  const {currentPosition, breadcrumbs, lastUpdated} = useLiveTracking(
     params.repId,
     liveEnabled,
   );
@@ -72,12 +71,26 @@ export default function RouteMapScreen() {
   const visitedCount = route?.shops.filter(s => s.visitStatus === 'visited').length ?? 0;
   const totalCount = route?.shops.length ?? 0;
 
-  // Split polyline into visited/unvisited segments
-  const visitedCoords =
-    route?.shops
-      .filter(s => s.visitStatus === 'visited')
-      .map(s => ({latitude: s.lat, longitude: s.lng})) ?? [];
-  const fullCoords = route?.polylineCoords ?? [];
+  // Planned route connecting all shop stops in sequence
+  const plannedCoords = route?.polylineCoords ?? [];
+
+  // Index of the last visited shop — remaining shops form the "ahead" segment
+  const lastVisitedIdx = route
+    ? [...route.shops]
+        .reverse()
+        .findIndex(s => s.visitStatus === 'visited')
+    : -1;
+  const lastVisitedSequence =
+    lastVisitedIdx >= 0 && route
+      ? route.shops.length - lastVisitedIdx
+      : 0;
+
+  // Remaining planned route: from last visited shop onward (dashed)
+  const remainingCoords = route
+    ? route.shops
+        .filter(s => s.sequence >= lastVisitedSequence)
+        .map(s => ({latitude: s.lat, longitude: s.lng}))
+    : [];
 
   return (
     <View style={styles.container}>
@@ -96,22 +109,35 @@ export default function RouteMapScreen() {
           latitudeDelta: 0.08,
           longitudeDelta: 0.08,
         }}>
-        {/* Full route (dashed, gray) */}
-        {fullCoords.length > 1 && (
+
+        {/* ── Planned route: full dashed gray line connecting all shops ── */}
+        {plannedCoords.length > 1 && (
           <Polyline
-            coordinates={fullCoords}
-            strokeColor={COLORS.unvisited + '80'}
-            strokeWidth={3}
-            lineDashPattern={[8, 6]}
+            coordinates={plannedCoords}
+            strokeColor={COLORS.unvisited + '50'}
+            strokeWidth={2}
+            lineDashPattern={[6, 5]}
           />
         )}
 
-        {/* Visited segment (solid, primary) */}
-        {visitedCoords.length > 1 && (
+        {/* ── Remaining planned route: bolder dashed from last visited shop ── */}
+        {remainingCoords.length > 1 && (
           <Polyline
-            coordinates={visitedCoords}
-            strokeColor={COLORS.primary}
+            coordinates={remainingCoords}
+            strokeColor={COLORS.accent + 'CC'}
+            strokeWidth={3}
+            lineDashPattern={[10, 6]}
+          />
+        )}
+
+        {/* ── Actual traveled path: breadcrumb GPS trail (3-second updates) ── */}
+        {breadcrumbs.length > 1 && liveEnabled && (
+          <Polyline
+            coordinates={breadcrumbs}
+            strokeColor={COLORS.live}
             strokeWidth={4}
+            lineJoin="round"
+            lineCap="round"
           />
         )}
 
@@ -120,7 +146,7 @@ export default function RouteMapScreen() {
           <ShopMarker key={shop.id} shop={shop} onPress={handleShopPress} />
         ))}
 
-        {/* Live rep position */}
+        {/* Live rep position at the tip of the breadcrumb trail */}
         {currentPosition && liveEnabled && (
           <RepMarker
             latitude={currentPosition.latitude}
@@ -147,9 +173,10 @@ export default function RouteMapScreen() {
 
       {/* Legend */}
       <View style={[styles.legend, {top: insets.top + 60}]}>
-        <LegendItem color={COLORS.visited} label="Visited" />
-        <LegendItem color={COLORS.skipped} label="Skipped" />
-        <LegendItem color={COLORS.unvisited} label="Pending" />
+        <LegendItem color={COLORS.live} label="Traveled path" solid />
+        <LegendItem color={COLORS.accent} label="Remaining route" dashed />
+        <LegendItem color={COLORS.visited} label="Visited shop" solid />
+        <LegendItem color={COLORS.unvisited} label="Pending shop" solid />
       </View>
 
       {/* Bottom summary card */}
@@ -157,34 +184,29 @@ export default function RouteMapScreen() {
         <View style={styles.bottomCardTop}>
           <View style={styles.repInfoRow}>
             <View style={styles.repAvatarSm}>
-              <Text style={styles.repAvatarSmText}>
-                {rep?.avatar ?? '??'}
-              </Text>
+              <Text style={styles.repAvatarSmText}>{rep?.avatar ?? '??'}</Text>
             </View>
             <View>
               <Text style={styles.repNameSm}>{rep?.name ?? '—'}</Text>
               <Text style={styles.repZone}>{rep?.zone ?? ''}</Text>
             </View>
           </View>
-
           <View style={styles.progressStats}>
             <Text style={styles.progressFraction}>{visitedCount}/{totalCount}</Text>
             <Text style={styles.progressLabel}>Shops</Text>
           </View>
         </View>
 
-        {/* Progress bar */}
         <View style={styles.progressBarBg}>
           <View style={[styles.progressBarFill, {width: `${progress}%`}]} />
         </View>
         <Text style={styles.progressPct}>{progress}% complete</Text>
 
-        {/* Live status */}
         {liveEnabled && (
           <View style={styles.liveRow}>
             <View style={styles.liveDot} />
             <Text style={styles.liveText}>
-              Live tracking active
+              {breadcrumbs.length} GPS point{breadcrumbs.length !== 1 ? 's' : ''} recorded
               {lastUpdated ? ` · ${lastUpdated.toLocaleTimeString()}` : ''}
             </Text>
           </View>
@@ -196,10 +218,25 @@ export default function RouteMapScreen() {
   );
 }
 
-function LegendItem({color, label}: {color: string; label: string}) {
+interface LegendItemProps {
+  color: string;
+  label: string;
+  solid?: boolean;
+  dashed?: boolean;
+}
+
+function LegendItem({color, label, solid, dashed}: LegendItemProps) {
   return (
     <View style={styles.legendItem}>
-      <View style={[styles.legendDot, {backgroundColor: color}]} />
+      {dashed ? (
+        <View style={styles.legendDashRow}>
+          <View style={[styles.legendDash, {backgroundColor: color}]} />
+          <View style={[styles.legendDashGap]} />
+          <View style={[styles.legendDash, {backgroundColor: color}]} />
+        </View>
+      ) : (
+        <View style={[styles.legendDot, {backgroundColor: color}]} />
+      )}
       <Text style={styles.legendLabel}>{label}</Text>
     </View>
   );
@@ -223,11 +260,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   retryText: {color: COLORS.textInverse, fontWeight: '600'},
-  actionButtons: {
-    position: 'absolute',
-    right: 16,
-    gap: 10,
-  },
+  actionButtons: {position: 'absolute', right: 16, gap: 10},
   mapBtn: {
     width: 44,
     height: 44,
@@ -258,13 +291,15 @@ const styles = StyleSheet.create({
   },
   legendItem: {flexDirection: 'row', alignItems: 'center', marginVertical: 3},
   legendDot: {width: 10, height: 10, borderRadius: 5, marginRight: 7},
+  legendDashRow: {flexDirection: 'row', alignItems: 'center', marginRight: 7},
+  legendDash: {width: 5, height: 3, borderRadius: 1},
+  legendDashGap: {width: 3},
   legendLabel: {fontSize: 11, color: COLORS.textSecondary, fontWeight: '500'},
   bottomCard: {
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
-    paddingBottom: 20,
     shadowColor: COLORS.shadow,
     shadowOffset: {width: 0, height: -4},
     shadowOpacity: 0.1,

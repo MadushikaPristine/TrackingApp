@@ -1,5 +1,6 @@
 export const CONFIG = {
-  POLLING_INTERVAL_MS: 5000,
+  POLLING_INTERVAL_MS: 3000,
+  MAX_BREADCRUMB_POINTS: 1200, // 1 hr of 3-second pings before oldest point drops off
   MAP_INITIAL_ZOOM_DELTA: 0.05,
   MAP_INITIAL_ZOOM_DELTA_LONG: 0.05,
   BOTTOM_SHEET_SNAP_POINTS: ['35%', '65%'],
