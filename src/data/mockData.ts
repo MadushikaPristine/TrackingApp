@@ -1,4 +1,41 @@
-import {Rep, Route, Shop} from '../types';
+import {GeoPoint, Rep, Route, Shop} from '../types';
+
+/**
+ * Generates GPS breadcrumb points along a path between two coordinates.
+ * `steps` controls how many intermediate points to insert.
+ * `jitter` adds a tiny road-curve variance (degrees) so the trail isn't
+ * a perfectly straight line between shops.
+ */
+function interpolate(
+  from: GeoPoint,
+  to: GeoPoint,
+  steps: number,
+  jitter = 0.0003,
+): GeoPoint[] {
+  const points: GeoPoint[] = [];
+  for (let i = 1; i <= steps; i++) {
+    const t = i / (steps + 1);
+    // Deterministic pseudo-random jitter based on position in sequence
+    const jLat = (Math.sin(i * 127.1 + from.latitude * 1000) * 0.5) * jitter;
+    const jLng = (Math.sin(i * 311.7 + from.longitude * 1000) * 0.5) * jitter;
+    points.push({
+      latitude: from.latitude + (to.latitude - from.latitude) * t + jLat,
+      longitude: from.longitude + (to.longitude - from.longitude) * t + jLng,
+    });
+  }
+  return points;
+}
+
+/** Builds a full GPS trail through an ordered list of visited shop coordinates. */
+function buildTrail(stops: GeoPoint[], stepsPerSegment = 8): GeoPoint[] {
+  if (stops.length === 0) {return [];}
+  const trail: GeoPoint[] = [stops[0]];
+  for (let i = 1; i < stops.length; i++) {
+    trail.push(...interpolate(stops[i - 1], stops[i], stepsPerSegment));
+    trail.push(stops[i]);
+  }
+  return trail;
+}
 
 export const MOCK_REPS: Rep[] = [
   {
@@ -384,6 +421,12 @@ export const MOCK_ROUTES: Route[] = [
     date: new Date().toISOString().split('T')[0],
     shops: rep1Shops,
     polylineCoords: rep1Shops.map(s => ({latitude: s.lat, longitude: s.lng})),
+    // GPS trail through the 4 visited shops (recorded by rep's mobile app)
+    locationHistory: buildTrail(
+      rep1Shops
+        .filter(s => s.visitStatus === 'visited')
+        .map(s => ({latitude: s.lat, longitude: s.lng})),
+    ),
     startTime: '08:00 AM',
     estimatedEndTime: '05:00 PM',
   },
@@ -393,6 +436,10 @@ export const MOCK_ROUTES: Route[] = [
     date: new Date().toISOString().split('T')[0],
     shops: rep2Shops,
     polylineCoords: rep2Shops.map(s => ({latitude: s.lat, longitude: s.lng})),
+    // All 6 shops visited — complete trail
+    locationHistory: buildTrail(
+      rep2Shops.map(s => ({latitude: s.lat, longitude: s.lng})),
+    ),
     startTime: '08:00 AM',
     estimatedEndTime: '04:00 PM',
   },
@@ -402,6 +449,12 @@ export const MOCK_ROUTES: Route[] = [
     date: new Date().toISOString().split('T')[0],
     shops: rep3Shops,
     polylineCoords: rep3Shops.map(s => ({latitude: s.lat, longitude: s.lng})),
+    // Trail through the 3 visited shops (shop 4 was skipped, rest unvisited)
+    locationHistory: buildTrail(
+      rep3Shops
+        .filter(s => s.visitStatus === 'visited')
+        .map(s => ({latitude: s.lat, longitude: s.lng})),
+    ),
     startTime: '08:00 AM',
     estimatedEndTime: '06:00 PM',
   },
@@ -411,6 +464,12 @@ export const MOCK_ROUTES: Route[] = [
     date: new Date().toISOString().split('T')[0],
     shops: rep4Shops,
     polylineCoords: rep4Shops.map(s => ({latitude: s.lat, longitude: s.lng})),
+    // Only 1 visited shop so far — trail is just the starting point
+    locationHistory: buildTrail(
+      rep4Shops
+        .filter(s => s.visitStatus === 'visited')
+        .map(s => ({latitude: s.lat, longitude: s.lng})),
+    ),
     startTime: '09:00 AM',
     estimatedEndTime: '06:00 PM',
   },

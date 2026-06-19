@@ -1,21 +1,18 @@
 import {useState, useEffect, useCallback} from 'react';
-import {Rep, Route} from '../types';
+import {Rep} from '../types';
 import {api} from '../services/api';
 
-interface UseRouteDataResult {
-  route: Route | null;
-  rep: Rep | null;
+interface UseRepsResult {
+  reps: Rep[];
   loading: boolean;
   error: string | null;
   refresh: () => void;
 }
 
-export function useRouteData(repId: string): UseRouteDataResult {
-  const [route, setRoute] = useState<Route | null>(null);
-  const [rep, setRep] = useState<Rep | null>(null);
+export function useReps(): UseRepsResult {
+  const [reps, setReps] = useState<Rep[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Bumped to trigger a re-fetch
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -25,28 +22,24 @@ export function useRouteData(repId: string): UseRouteDataResult {
 
     (async () => {
       try {
-        const [foundRep, foundRoute] = await Promise.all([
-          api.getRep(repId, controller.signal),
-          api.getRoute(repId, controller.signal),
-        ]);
-        setRep(foundRep);
-        setRoute(foundRoute);
+        const data = await api.getReps(controller.signal);
+        setReps(data);
       } catch (e: any) {
         if (e?.name === 'AbortError') {
           return;
         }
-        setError(e?.message ?? 'Failed to load route data');
+        setError(e?.message ?? 'Failed to load representatives');
       } finally {
         setLoading(false);
       }
     })();
 
     return () => controller.abort();
-  }, [repId, reloadToken]);
+  }, [reloadToken]);
 
   const refresh = useCallback(() => {
     setReloadToken(t => t + 1);
   }, []);
 
-  return {route, rep, loading, error, refresh};
+  return {reps, loading, error, refresh};
 }

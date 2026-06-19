@@ -32,6 +32,7 @@ export default function RouteMapScreen() {
   const {currentPosition, breadcrumbs, totalDistanceKm, lastUpdated} = useLiveTracking(
     params.repId,
     liveEnabled,
+    route?.locationHistory ?? [],
   );
 
   const handleFitRoute = useCallback(() => {

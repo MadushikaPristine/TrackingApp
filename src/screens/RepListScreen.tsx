@@ -1,4 +1,4 @@
-import React, {useCallback, useState} from 'react';
+import React, {useCallback} from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
 import {StackNavigationProp} from '@react-navigation/stack';
 import {Rep, RootStackParamList} from '../types';
-import {MOCK_REPS} from '../data/mockData';
+import {useReps} from '../hooks/useReps';
 import {COLORS} from '../constants/colors';
 import StatusTag from '../components/common/StatusTag';
 
@@ -70,8 +70,7 @@ function RepCard({rep, onPress}: {rep: Rep; onPress: (rep: Rep) => void}) {
 export default function RepListScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
-  const [reps, setReps] = useState<Rep[]>(MOCK_REPS);
-  const [refreshing, setRefreshing] = useState(false);
+  const {reps, loading, error, refresh} = useReps();
 
   const handlePress = useCallback(
     (rep: Rep) => {
@@ -81,12 +80,8 @@ export default function RepListScreen() {
   );
 
   const handleRefresh = useCallback(() => {
-    setRefreshing(true);
-    setTimeout(() => {
-      setReps([...MOCK_REPS]);
-      setRefreshing(false);
-    }, 800);
-  }, []);
+    refresh();
+  }, [refresh]);
 
   const renderItem: ListRenderItem<Rep> = useCallback(
     ({item}) => <RepCard rep={item} onPress={handlePress} />,
@@ -123,7 +118,7 @@ export default function RepListScreen() {
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing}
+            refreshing={loading}
             onRefresh={handleRefresh}
             colors={[COLORS.primary]}
             tintColor={COLORS.primary}
@@ -131,6 +126,20 @@ export default function RepListScreen() {
         }
         showsVerticalScrollIndicator={false}
         ItemSeparatorComponent={() => <View style={{height: 12}} />}
+        ListEmptyComponent={
+          !loading ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>
+                {error ?? 'No representatives found'}
+              </Text>
+              {error ? (
+                <TouchableOpacity style={styles.retryBtn} onPress={handleRefresh}>
+                  <Text style={styles.retryText}>Retry</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : null
+        }
       />
     </View>
   );
@@ -205,4 +214,13 @@ const styles = StyleSheet.create({
   },
   progressText: {fontSize: 12, color: COLORS.textSecondary, fontWeight: '500'},
   chevron: {fontSize: 26, color: COLORS.border, marginLeft: 8, marginTop: 8},
+  emptyState: {alignItems: 'center', justifyContent: 'center', paddingTop: 80, paddingHorizontal: 24},
+  emptyText: {fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', marginBottom: 16},
+  retryBtn: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  retryText: {color: COLORS.textInverse, fontWeight: '600'},
 });
